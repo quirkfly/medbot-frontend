@@ -8,42 +8,43 @@ import {
   CListGroup,
   CListGroupItem,
   CSpinner,
+  CFormSelect,
 } from '@coreui/react';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 
 interface Message {
-  role: 'assistant' | 'user';
+  role: 'assistant' | 'user' | 'system';
   content: string;
-  content_sk?: string; // Optional for assistant messages in Slovak
 }
 
 const ChatPage = () => {
   const [conversation, setConversation] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [patientLanguage, setPatientLanguage] = useState<'Slovak' | 'English' | 'German' | 'Spanish'>('Slovak');
 
-  const patientId = 1;
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    const initializeConversation = async () => {
-      setLoading(true);
-      try {
-        const response = await axios.get(
-          `http://localhost:8000/start-consultation/${patientId}`
-        );
-        const { greeting, conversation: initialMessages } = response.data;
-        setConversation(initialMessages);
-      } catch (error) {
-        console.error('Failed to initialize conversation:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const initializeConversation = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get(
+        `http://localhost:8000/start-consultation/${encodeURIComponent(patientLanguage)}`
+      );
+      const { conversation: initialMessages } = res.data;
+      setConversation(initialMessages || []);
+    } catch (error) {
+      console.error('Failed to initialize conversation:', error);
+      setConversation([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [patientLanguage]);
 
+  useEffect(() => {
     initializeConversation();
-  }, [patientId]);
+  }, [initializeConversation]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -53,27 +54,29 @@ const ChatPage = () => {
     e.preventDefault();
     if (!input.trim()) return;
 
-    const updatedConversation = [...conversation, { role: 'user', content: input }];
+    const updatedConversation: Message[] = [...conversation, { role: 'user', content: input }];
 
     setLoading(true);
     try {
-      const response = await axios.post('http://localhost:8000/chat', {
+      const res = await axios.post('http://localhost:8000/chat', {
         input,
         conversation: updatedConversation,
       });
 
-      const { reply, conversation: newConversation } = response.data;
-      setConversation(newConversation);
+      const { conversation: newConversation } = res.data;
+      setConversation(newConversation || updatedConversation);
       setInput('');
     } catch (err) {
       console.error('Chat error:', err);
+      // Keep the optimistic user message on failure
+      setConversation(updatedConversation);
     } finally {
       setLoading(false);
     }
   };
 
   const filteredConversation = conversation
-    .filter(msg => msg.role === 'assistant' || msg.role === 'user')
+    .filter((msg) => msg.role === 'assistant' || msg.role === 'user')
     .filter((msg, idx, arr) => {
       if (
         msg.role === 'user' &&
@@ -90,13 +93,11 @@ const ChatPage = () => {
     <>
       <style>
         {`
-          /* Remove bullet points from CListGroup */
           .no-bullets {
             list-style-type: none !important;
             padding-left: 0 !important;
             margin: 0 !important;
           }
-          /* Remove input focus border */
           .no-focus-border:focus {
             outline: none !important;
             box-shadow: none !important;
@@ -126,13 +127,28 @@ const ChatPage = () => {
               style={{
                 fontWeight: '700',
                 color: '#007bff',
-                marginBottom: '1.5rem',
+                marginBottom: '1rem',
                 textAlign: 'center',
                 fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
               }}
             >
               MedBot Virtuálny Asistent
             </h2>
+
+            {/* Language selector */}
+            <div style={{ marginBottom: '1rem' }}>
+              <CFormSelect
+                value={patientLanguage}
+                onChange={(e) => setPatientLanguage(e.target.value as any)}
+                disabled={loading}
+                aria-label="Select patient language"
+              >
+                <option value="Slovak">Slovak</option>
+                <option value="English">English</option>
+                <option value="German">German</option>
+                <option value="Spanish">Spanish</option>
+              </CFormSelect>
+            </div>
 
             <div
               style={{
@@ -163,24 +179,16 @@ const ChatPage = () => {
                         borderRadius: '12px',
                         listStyleType: 'none',
                         alignSelf: isAssistant ? 'flex-end' : 'flex-start',
-                        maxWidth: '75%',  // limits bubble width
+                        maxWidth: '75%',
                         marginBottom: '0.5rem',
                       }}
                     >
-                      <div
-                        style={{
-                          textAlign: isAssistant ? 'right' : 'left',
-                        }}
-                      >
+                      <div style={{ textAlign: isAssistant ? 'right' : 'left' }}>
                         <strong>{isAssistant ? 'Asistent' : 'Vy'}:</strong>{' '}
-                        {isAssistant ? msg.content_sk : msg.content}
+                        {msg.content}
                       </div>
                       {loading && idx === filteredConversation.length - 1 && isAssistant && (
-                        <CSpinner
-                          size="sm"
-                          color="primary"
-                          className="ms-2 align-self-center"
-                        />
+                        <CSpinner size="sm" color="primary" className="ms-2 align-self-center" />
                       )}
                     </CListGroupItem>
                   );
